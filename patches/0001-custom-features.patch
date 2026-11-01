@@ -2128,7 +2128,7 @@ index 0000000..b40746d
 +		Ui::Toast::Show(QString::fromUtf8("这个号还没登录"));
 +		return;
 +	}
-+	auto *window = Core::App().ensureSeparateWindowFor(account);
++	const auto window = Core::App().ensureSeparateWindowFor(account);
 +	const auto widget = window->widget();
 +	if (insideApp) {
 +		widget->setWindowFlag(Qt::Tool, true);
