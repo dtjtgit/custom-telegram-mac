@@ -2382,7 +2382,7 @@ new file mode 100644
 index 0000000..5258eb4
 --- /dev/null
 +++ b/Telegram/SourceFiles/custom/custom_export.cpp
-@@ -0,0 +1,732 @@
+@@ -0,0 +1,734 @@
 +#include "custom/custom_export.h"
 +
 +#include "custom/custom_control.h"

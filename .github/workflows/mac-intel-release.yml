@@ -43,6 +43,29 @@ jobs:
         run: |
           set -euo pipefail
           cd tdesktop
+          python3 - << 'PY'
+          import re, sys
+          from pathlib import Path
+          for patch in sorted(Path("../overlay/patches").glob("*.patch")):
+              lines = patch.read_text().splitlines()
+              i = 0
+              while i < len(lines):
+                  if lines[i].startswith("@@ -0,0 +1,"):
+                      hdr = lines[i]
+                      want = int(hdr.split("+1,")[1].split()[0])
+                      i += 1
+                      got = 0
+                      while i < len(lines) and not lines[i].startswith("@@") and not lines[i].startswith("diff --git"):
+                          if lines[i].startswith("+") and not lines[i].startswith("+++"):
+                              got += 1
+                          i += 1
+                      if got != want:
+                          print(f"{patch.name}: hunk says +{want} lines but file has {got}")
+                          sys.exit(1)
+                      continue
+                  i += 1
+          print("patch hunk counts ok")
+          PY
           git apply --check --whitespace=nowarn ../overlay/patches/0001-custom-features.patch
           git apply --check --whitespace=nowarn ../overlay/patches/0002-channel-link.patch
           git apply --whitespace=nowarn ../overlay/patches/0001-custom-features.patch
