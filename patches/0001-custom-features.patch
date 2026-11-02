@@ -413,7 +413,7 @@ new file mode 100644
 index 0000000..5c467b3
 --- /dev/null
 +++ b/Telegram/SourceFiles/custom/custom_account_rail.cpp
-@@ -0,0 +1,638 @@
+@@ -0,0 +1,669 @@
 +#include "custom/custom_account_rail.h"
 +
 +#include "core/application.h"
@@ -476,17 +476,20 @@ index 0000000..5c467b3
 +	RailButton(
 +		QWidget *parent,
 +		const QString &name,
++		int number,
 +		int unread,
 +		bool active)
 +	: QPushButton(parent)
 +	, _name(name)
++	, _number(number)
 +	, _unread(unread)
 +	, _active(active)
 +	, _up(new QPushButton(QString::fromUtf8("▲"), this))
 +	, _down(new QPushButton(QString::fromUtf8("▼"), this)) {
 +		setCursor(Qt::PointingHandCursor);
++		setFocusPolicy(Qt::NoFocus);
 +		setFixedHeight(64);
-+		setToolTip(name);
++		setToolTip(QString::number(number) + ' ' + name);
 +		const auto tiny = QString(
 +			"QPushButton{background:transparent;color:#c5d3de;border:0;"
 +			"font-size:9px;padding:0;}"
@@ -558,16 +561,24 @@ index 0000000..5c467b3
 +				Qt::AlignCenter,
 +				QString::number(std::min(_unread, 99)));
 +		}
++		p.setPen(Qt::white);
++		p.setFont(QFont(font().family(), 8, QFont::Bold));
++		p.drawText(
++			QRect(left, top + size - 14, size, 12),
++			Qt::AlignHCenter | Qt::AlignVCenter,
++			QString::number(_number));
 +		p.setPen(QColor(197, 211, 222));
 +		p.setFont(QFont(font().family(), 8));
++		const auto caption = QString::number(_number) + ' ' + _name;
 +		p.drawText(
 +			QRect(2, 50, width() - 18, 12),
 +			Qt::AlignHCenter | Qt::AlignVCenter,
-+			_name);
++			caption);
 +	}
 +
 +private:
 +	QString _name;
++	int _number = 0;
 +	int _unread = 0;
 +	int _hop = 0;
 +	bool _active = false;
@@ -593,10 +604,14 @@ index 0000000..5c467b3
 +, _export(new QPushButton(QString::fromUtf8("导出"), this))
 +, _bounce(new QTimer(this)) {
 +	setAcceptDrops(true);
-+	_search->setPlaceholderText(QString::fromUtf8("名称/号码"));
++	_search->setPlaceholderText(QString::fromUtf8("编号/名称/号码"));
 +	_search->setStyleSheet(
 +		"QLineEdit{background:#1f2e3d;color:#fff;border:0;"
-+		"border-radius:8px;padding:6px;font-size:11px;}");
++		"border-radius:8px;padding:4px;font-size:11px;}");
++	_count = new QLabel(this);
++	_count->setAlignment(Qt::AlignCenter);
++	_count->setStyleSheet(
++		"QLabel{color:#c5d3de;background:transparent;font-size:10px;}");
 +	_scroll->setFrameShape(QFrame::NoFrame);
 +	_scroll->setWidgetResizable(false);
 +	_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -832,6 +847,9 @@ index 0000000..5c467b3
 +	// setWidget() deletes the old row and sends a palette event into
 +	// eventFilter while that row is already freed. Drop it first.
 +	_inner = nullptr;
++	const auto savedScroll = _scroll->verticalScrollBar()
++		? _scroll->verticalScrollBar()->value()
++		: 0;
 +	if (auto *previous = _scroll->takeWidget()) {
 +		previous->hide();
 +		previous->setParent(nullptr);
@@ -843,13 +861,17 @@ index 0000000..5c467b3
 +	layout->setSpacing(2);
 +	const auto current = &_controller->session().account();
 +	auto contentHeight = 8;
++	auto number = 0;
++	auto shown = 0;
 +	for (const auto account : Core::App().domain().orderedAccounts()) {
 +		if (!account->sessionExists()) {
 +			continue;
 +		}
++		++number;
 +		if (!AccountMatchesQuery(account, _query)) {
 +			continue;
 +		}
++		++shown;
 +		const auto user = account->session().user();
 +		const auto unread = account->session().data().personalUnreadBadge();
 +		_lastUnread[account.get()] = unread;
@@ -863,6 +885,7 @@ index 0000000..5c467b3
 +		const auto button = new RailButton(
 +			inner,
 +			label,
++			number,
 +			unread,
 +			account == current);
 +		button->installEventFilter(this);
@@ -901,6 +924,12 @@ index 0000000..5c467b3
 +	inner->resize(innerWidth, innerHeight);
 +	_scroll->setMinimumSize(0, 0);
 +	_scroll->setWidget(inner);
++	if (const auto bar = _scroll->verticalScrollBar()) {
++		bar->setValue(std::min(savedScroll, bar->maximum()));
++	}
++	_count->setText(_query.isEmpty()
++		? QString::fromUtf8("%1 个帐号").arg(number)
++		: QString::fromUtf8("%1/%2 个").arg(shown).arg(number));
 +	_inner = inner;
 +	_add->raise();
 +	_import->raise();
@@ -1000,10 +1029,11 @@ index 0000000..5c467b3
 +void AccountRail::resizeEvent(QResizeEvent *e) {
 +	const auto railW = std::max(width(), 0);
 +	const auto controlW = std::max(railW - 12, 0);
-+	_search->setGeometry(6, 8, controlW, 28);
++	_search->setGeometry(6, 6, controlW, 24);
++	_count->setGeometry(6, 30, controlW, 14);
 +	const auto buttonH = 28;
 +	const auto gap = 4;
-+	constexpr auto searchBottom = 42;
++	constexpr auto searchBottom = 48;
 +	setMinimumHeight(searchBottom + buttonH * 3 + gap * 2 + 6);
 +	auto y = height() - 6 - buttonH;
 +	if (y < searchBottom) {
@@ -1028,6 +1058,7 @@ index 0000000..5c467b3
 +	_import->raise();
 +	_export->raise();
 +	_search->raise();
++	_count->raise();
 +	placeLoginSheet();
 +}
 +
@@ -1057,7 +1088,7 @@ new file mode 100644
 index 0000000..c9044dc
 --- /dev/null
 +++ b/Telegram/SourceFiles/custom/custom_account_rail.h
-@@ -0,0 +1,75 @@
+@@ -0,0 +1,77 @@
 +#pragma once
 +
 +#include "ui/rp_widget.h"
@@ -1070,6 +1101,7 @@ index 0000000..c9044dc
 +class QPushButton;
 +class QScrollArea;
 +class QTimer;
++class QLabel;
 +class QWidget;
 +
 +namespace Main {
@@ -1113,6 +1145,7 @@ index 0000000..c9044dc
 +	bool _rebuilding = false;
 +	bool _rebuildQueued = false;
 +	QLineEdit *_search = nullptr;
++	QLabel *_count = nullptr;
 +	QScrollArea *_scroll = nullptr;
 +	QWidget *_inner = nullptr;
 +	QPushButton *_add = nullptr;
@@ -1138,7 +1171,7 @@ new file mode 100644
 index 0000000..b40746d
 --- /dev/null
 +++ b/Telegram/SourceFiles/custom/custom_control.cpp
-@@ -0,0 +1,1166 @@
+@@ -0,0 +1,1429 @@
 +#include "custom/custom_control.h"
 +
 +#include "api/api_common.h"
@@ -1202,6 +1235,8 @@ index 0000000..b40746d
 +#   commands/export.json   {"all":true} or {"phones":["84..."],"delete":false}
 +#   commands/list
 +#   commands/send.json     {"phone":"84...","peer":"@name","text":"hi"}
++#   commands/action.json   {"op":"join","all":true,"target":"https://t.me/+xxx"}
++#                          {"op":"leave","all":true,"targets":"all"}
 +# Add a button in keyboard() and handle it in on_button().
 +if ! command -v python3 >/dev/null 2>&1; then
 +  echo "python3 missing" >&2
@@ -1242,6 +1277,8 @@ index 0000000..b40746d
 +         {"text": "导出指定", "callback_data": "export_ask"}],
 +        [{"text": "导出并移除", "callback_data": "export_delete"},
 +         {"text": "发消息", "callback_data": "send_ask"}],
++        [{"text": "加群/频道", "callback_data": "join_ask"},
++         {"text": "退出群和频道", "callback_data": "leave_all"}],
 +        [{"text": "帮助", "callback_data": "help"}],
 +    ]}
 +
@@ -1325,8 +1362,15 @@ index 0000000..b40746d
 +    elif data == "send_ask":
 +        save_chat({"mode": "send_phone"})
 +        send_text(token, admin, "先回复用哪个号发，写手机号。")
++    elif data == "join_ask":
++        save_chat({"mode": "join_target"})
++        send_text(token, admin, "回复要加的链接或 @用户名。下一步再回复 all，或手机号（多个用空格）。")
++    elif data == "leave_all":
++        write_json(os.path.join(COMMANDS, "action.json"), {"op": "leave", "all": True, "targets": "all"})
++        result = wait_last(now, 90)
++        send_text(token, admin, (result or {}).get("text") or "客户端没有回应，先打开客户端。")
 +    elif data == "help":
-+        send_text(token, admin, "导入、导出、列表、发消息都是按钮。\n加功能不用重编译，改 bot/run 里的 keyboard 和 on_button。")
++        send_text(token, admin, "导入、导出、加群、退群、发消息都是按钮。\n加新按钮不用重编译：改 bot/run 的 keyboard 和 on_button，往 commands/action.json 写 op。\n现在客户端认 join 和 leave。")
 +    else:
 +        send_text(token, admin, "未知按钮。")
 +
@@ -1345,6 +1389,20 @@ index 0000000..b40746d
 +        save_chat({})
 +        result = wait_last(now, 90)
 +        send_text(token, admin, (result or {}).get("text") or "导出没有回应。")
++    elif mode == "join_target":
++        save_chat({"mode": "join_who", "target": text.strip()})
++        send_text(token, admin, "回复 all（全部已登录号）或手机号，多个用空格。")
++    elif mode == "join_who":
++        target = chat.get("target") or ""
++        if text.strip().lower() == "all":
++            body = {"op": "join", "all": True, "target": target}
++        else:
++            phones = [part for part in text.replace(",", " ").split() if part.strip()]
++            body = {"op": "join", "phones": phones, "target": target}
++        write_json(os.path.join(COMMANDS, "action.json"), body)
++        save_chat({})
++        result = wait_last(now, 90)
++        send_text(token, admin, (result or {}).get("text") or "客户端没有回应，先打开客户端。")
 +    elif mode == "send_phone":
 +        save_chat({"mode": "send_peer", "phone": text.strip()})
 +        send_text(token, admin, "回复对方，用 @用户名。")
@@ -1619,6 +1677,155 @@ index 0000000..b40746d
 +	}).send();
 +}
 +
++[[nodiscard]] QString InviteHash(QString text) {
++	text = text.trimmed();
++	const auto lower = text.toLower();
++	auto pos = lower.indexOf("joinchat/");
++	if (pos >= 0) {
++		return text.mid(pos + 9).section('/', 0, 0).section('?', 0, 0);
++	}
++	pos = lower.indexOf("t.me/+");
++	if (pos >= 0) {
++		return text.mid(pos + 6).section('/', 0, 0).section('?', 0, 0);
++	}
++	pos = lower.indexOf("invite=");
++	if (pos >= 0) {
++		return text.mid(pos + 7).section('&', 0, 0);
++	}
++	if (text.startsWith('+') && text.size() > 8) {
++		return text.mid(1);
++	}
++	return {};
++}
++
++[[nodiscard]] QString UsernameOf(QString text) {
++	if (!InviteHash(text).isEmpty()) {
++		return {};
++	}
++	text = text.trimmed();
++	text.remove(u"https://"_q);
++	text.remove(u"http://"_q);
++	if (text.startsWith(u"t.me/"_q, Qt::CaseInsensitive)) {
++		text = text.mid(5);
++	}
++	if (text.startsWith('@')) {
++		text.remove(0, 1);
++	}
++	return text.section('/', 0, 0).section('?', 0, 0).trimmed();
++}
++
++void JoinTarget(not_null<Main::Session*> session, const QString &raw) {
++	const auto hash = InviteHash(raw);
++	if (!hash.isEmpty()) {
++		session->api().request(MTPmessages_ImportChatInvite(
++			MTP_string(hash)
++		)).done([=](const MTPmessages_ChatInviteJoinResult &result) {
++			result.match([&](const MTPDmessages_chatInviteJoinResultOk &data) {
++				session->api().applyUpdates(data.vupdates());
++				WriteLast(u"join"_q, true, QString::fromUtf8("已提交加入"));
++			}, [&](const MTPDmessages_chatInviteJoinResultWebView &) {
++				WriteLast(u"join"_q, false, QString::fromUtf8("这个邀请要在网页里确认"));
++			});
++		}).fail([=](const MTP::Error &error) {
++			WriteLast(u"join"_q, false, error.type());
++		}).send();
++		return;
++	}
++	const auto username = UsernameOf(raw);
++	if (username.isEmpty()) {
++		WriteLast(u"join"_q, false, QString::fromUtf8("链接或用户名为空"));
++		return;
++	}
++	if (const auto known = session->data().peerByUsername(username)) {
++		if (const auto channel = known->asChannel()) {
++			session->api().joinChannel(channel);
++			WriteLast(u"join"_q, true, QString::fromUtf8("已提交加入 %1").arg(channel->name()));
++		} else {
++			WriteLast(u"join"_q, false, QString::fromUtf8("这不是群或频道"));
++		}
++		return;
++	}
++	using Flag = MTPcontacts_ResolveUsername::Flag;
++	session->api().request(MTPcontacts_ResolveUsername(
++		MTP_flags(Flag()),
++		MTP_string(username),
++		MTP_string()
++	)).done([=](const MTPcontacts_ResolvedPeer &result) {
++		result.match([&](const MTPDcontacts_resolvedPeer &data) {
++			session->data().processUsers(data.vusers());
++			session->data().processChats(data.vchats());
++			if (const auto peerId = peerFromMTP(data.vpeer())) {
++				const auto peer = session->data().peer(peerId);
++				if (const auto channel = peer->asChannel()) {
++					session->api().joinChannel(channel);
++					WriteLast(
++						u"join"_q,
++						true,
++						QString::fromUtf8("已提交加入 %1").arg(channel->name()));
++					return;
++				}
++			}
++			WriteLast(u"join"_q, false, QString::fromUtf8("这不是群或频道"));
++		});
++	}).fail([=](const MTP::Error &error) {
++		WriteLast(u"join"_q, false, error.type());
++	}).send();
++}
++
++int LeaveAllMemberships(not_null<Main::Session*> session) {
++	std::vector<not_null<PeerData*>> peers;
++	const auto addList = [&](not_null<Dialogs::IndexedList*> list) {
++		for (const auto &row : *list) {
++			const auto history = row->history();
++			if (!history) {
++				continue;
++			}
++			const auto peer = history->peer;
++			if (const auto channel = peer->asChannel()) {
++				if (channel->amIn()) {
++					peers.push_back(peer);
++				}
++			} else if (const auto chat = peer->asChat()) {
++				if (chat->amIn()) {
++					peers.push_back(peer);
++				}
++			}
++		}
++	};
++	addList(session->data().chatsList()->indexed());
++	if (const auto folder = session->data().folderLoaded(Data::Folder::kId)) {
++		addList(session->data().chatsList(folder)->indexed());
++	}
++	for (const auto peer : peers) {
++		if (const auto channel = peer->asChannel()) {
++			session->api().leaveChannel(channel);
++			session->data().deleteConversationLocally(peer);
++		} else {
++			session->api().deleteConversation(peer, false);
++		}
++	}
++	return int(peers.size());
++}
++
++std::vector<not_null<Main::Account*>> AccountsForCommand(const QJsonObject &obj) {
++	const auto all = obj.value("all").toBool();
++	QStringList phones;
++	for (const auto value : obj.value("phones").toArray()) {
++		phones.push_back(Digits(value.toString()));
++	}
++	std::vector<not_null<Main::Account*>> picked;
++	for (const auto account : Core::App().domain().orderedAccounts()) {
++		if (!account->sessionExists()) {
++			continue;
++		}
++		const auto phone = Digits(account->session().user()->phone());
++		if (all || phones.contains(phone)) {
++			picked.push_back(account);
++		}
++	}
++	return picked;
++}
++
 +void PollBotCommands() {
 +	static auto busy = false;
 +	if (busy || !Core::App().domain().started()) {
@@ -1740,6 +1947,48 @@ index 0000000..b40746d
 +			WriteLast(u"send"_q, false, QString::fromUtf8("要填对方和内容"));
 +		} else {
 +			SendText(&account->session(), peerName, text);
++		}
++	}
++
++	if (const auto body = take(BotDir() + u"commands/action.json"_q); !body.isNull()) {
++		const auto obj = QJsonDocument::fromJson(body).object();
++		const auto op = obj.value("op").toString();
++		const auto picked = AccountsForCommand(obj);
++		if (picked.empty()) {
++			WriteLast(u"action"_q, false, QString::fromUtf8("没有匹配的已登录帐号"));
++		} else if (op == u"join"_q) {
++			const auto target = obj.value("target").toString().trimmed();
++			if (target.isEmpty()) {
++				WriteLast(u"join"_q, false, QString::fromUtf8("没有链接或用户名"));
++			} else {
++				for (const auto account : picked) {
++					JoinTarget(&account->session(), target);
++				}
++				WriteLast(
++					u"join"_q,
++					true,
++					QString::fromUtf8("已让 %1 个号去加入").arg(picked.size()));
++			}
++		} else if (op == u"leave"_q) {
++			const auto everything = obj.value("targets").toString() == u"all"_q
++				|| obj.value("all_chats").toBool();
++			auto total = 0;
++			if (everything) {
++				for (const auto account : picked) {
++					total += LeaveAllMemberships(&account->session());
++				}
++				WriteLast(
++					u"leave"_q,
++					true,
++					QString::fromUtf8("已提交退出 %1 个群或频道").arg(total));
++			} else {
++				WriteLast(u"leave"_q, false, QString::fromUtf8("退指定群请用 targets=all，或在客户端里勾选"));
++			}
++		} else {
++			WriteLast(
++				u"action"_q,
++				false,
++				QString::fromUtf8("未知操作 %1。现在支持 join / leave。新按钮写在 bot/run，不用重编译。").arg(op));
 +		}
 +	}
 +	busy = false;
@@ -2154,11 +2403,8 @@ index 0000000..b40746d
 +				continue;
 +			}
 +			const auto peer = history->peer;
-+			if (peer->isBroadcast()) {
-+				continue;
-+			}
 +			if (const auto channel = peer->asChannel()) {
-+				if (!channel->isMegagroup() || !channel->amIn()) {
++				if (!channel->amIn()) {
 +					continue;
 +				}
 +			} else if (const auto chat = peer->asChat()) {
@@ -2176,21 +2422,21 @@ index 0000000..b40746d
 +		addList(session.data().chatsList(folder)->indexed());
 +	}
 +	if (groups.empty()) {
-+		Ui::Toast::Show(QString::fromUtf8("这个号没有可退出的群组"));
++		Ui::Toast::Show(QString::fromUtf8("这个号没有可退出的群或频道"));
 +		return;
 +	}
 +
 +	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
-+		box->setTitle(rpl::single(QString::fromUtf8("批量退出群组")));
++		box->setTitle(rpl::single(QString::fromUtf8("批量退出群组和频道")));
 +		box->addRow(object_ptr<Ui::FlatLabel>(
 +			box,
 +			rpl::single(QString::fromUtf8(
-+				"勾选要退的群，点一并退出。频道不在这里。")),
++				"群和频道都能勾。点一并退出。")),
 +			st::boxLabel));
 +		const auto search = box->addRow(object_ptr<Ui::InputField>(
 +			box,
 +			st::defaultInputField,
-+			rpl::single(QString::fromUtf8("搜索群名称"))));
++			rpl::single(QString::fromUtf8("搜索群或频道"))));
 +		const auto checks = std::make_shared<
 +			std::vector<std::pair<not_null<PeerData*>, Ui::Checkbox*>>>();
 +		for (const auto peer : groups) {
@@ -2225,7 +2471,7 @@ index 0000000..b40746d
 +				}
 +			}
 +			if (picked.empty()) {
-+				Ui::Toast::Show(QString::fromUtf8("没有勾选群组"));
++				Ui::Toast::Show(QString::fromUtf8("没有勾选"));
 +				return;
 +			}
 +			box->closeBox();
@@ -2240,7 +2486,7 @@ index 0000000..b40746d
 +					++left;
 +				}
 +			}
-+			Ui::Toast::Show(QString::fromUtf8("正在退出 %1 个群组").arg(left));
++			Ui::Toast::Show(QString::fromUtf8("正在退出 %1 个群或频道").arg(left));
 +		}, st::attentionBoxButton);
 +		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 +	}));
@@ -2270,14 +2516,64 @@ index 0000000..b40746d
 +			QString::fromUtf8("自动运行机器人"),
 +			saved.value("enabled").toBool(),
 +			st::defaultBoxCheckbox));
++		auto loggedIn = 0;
++		for (const auto account : Core::App().domain().orderedAccounts()) {
++			if (account->sessionExists()) {
++				++loggedIn;
++			}
++		}
++		const auto target = box->addRow(object_ptr<Ui::InputField>(
++			box,
++			st::defaultInputField,
++			rpl::single(QString::fromUtf8("加群/频道：链接或 @用户名"))));
++		const auto everyone = box->addRow(object_ptr<Ui::Checkbox>(
++			box,
++			QString::fromUtf8("全部已登录号一起做"),
++			false,
++			st::defaultBoxCheckbox));
 +		box->addRow(object_ptr<Ui::FlatLabel>(
 +			box,
 +			rpl::single(QString::fromUtf8(
-+				"导出的号包由机器人发给这个管理员。"
++				"已登录 %1 个。群和频道都能退。"
 +				"机器人按钮在 TelegramForcePortable/bot/run，改那个文件不用重新编译。"
-+				"里面可以导入、导出、看列表、发消息，再加按钮也只改这个文件。")),
++				"加群、退群、以后的新按钮都写 commands/action.json，op 用 join 或 leave。"
++				"新操作只要还是这两种，只改 bot/run。").arg(loggedIn)),
 +			st::boxLabel));
-+		box->addButton(rpl::single(QString::fromUtf8("批量退群")), [=] {
++		box->addButton(rpl::single(QString::fromUtf8("加入")), [=] {
++			const auto link = target->getLastText().trimmed();
++			if (link.isEmpty()) {
++				Ui::Toast::Show(QString::fromUtf8("先填链接或 @用户名"));
++				return;
++			}
++			auto n = 0;
++			for (const auto account : Core::App().domain().orderedAccounts()) {
++				if (!account->sessionExists()) {
++					continue;
++				}
++				if (!everyone->checked()
++					&& account != &controller->session().account()) {
++					continue;
++				}
++				JoinTarget(&account->session(), link);
++				++n;
++			}
++			Ui::Toast::Show(QString::fromUtf8("已让 %1 个号去加入").arg(n));
++		});
++		box->addButton(rpl::single(QString::fromUtf8("退出群和频道")), [=] {
++			if (everyone->checked()) {
++				auto total = 0;
++				auto accounts = 0;
++				for (const auto account : Core::App().domain().orderedAccounts()) {
++					if (!account->sessionExists()) {
++						continue;
++					}
++					total += LeaveAllMemberships(&account->session());
++					++accounts;
++				}
++				Ui::Toast::Show(QString::fromUtf8(
++					"已让 %1 个号退出，共 %2 个群或频道").arg(accounts).arg(total));
++				return;
++			}
 +			box->closeBox();
 +			ShowLeaveGroupsBox(controller);
 +		});
@@ -3161,7 +3457,7 @@ new file mode 100644
 index 0000000..e1d6496
 --- /dev/null
 +++ b/Telegram/SourceFiles/custom/custom_import.cpp
-@@ -0,0 +1,1139 @@
+@@ -0,0 +1,1149 @@
 +#include "custom/custom_import.h"
 +
 +#include "api/api_updates.h"
@@ -4106,6 +4402,16 @@ index 0000000..e1d6496
 +	}
 +	if (!account->sessionExists()) {
 +		return false;
++	}
++	auto index = 0;
++	for (const auto &one : Core::App().domain().orderedAccounts()) {
++		if (!one->sessionExists()) {
++			continue;
++		}
++		++index;
++		if (one.get() == account.get() && q == QString::number(index)) {
++			return true;
++		}
 +	}
 +	const auto user = account->session().user();
 +	const auto digits = [](QString value) {
